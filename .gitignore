@@ -1,0 +1,104 @@
+# ==============================================================================
+# CREATOR RAG SYSTEM - MAIN GITIGNORE
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Dependencies
+# ------------------------------------------------------------------------------
+node_modules/
+**/node_modules/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# ------------------------------------------------------------------------------
+# Environment Variables & Secrets (Do not commit api keys/secrets)
+# ------------------------------------------------------------------------------
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+backend/.env
+frontend/.env
+
+# Explicitly ensure example environment templates are tracked
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# ------------------------------------------------------------------------------
+# Build & Compilation Outputs
+# ------------------------------------------------------------------------------
+dist/
+**/dist/
+build/
+**/build/
+.next/
+**/out/
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+
+# ------------------------------------------------------------------------------
+# Media Downloads & Dynamic Content
+# ------------------------------------------------------------------------------
+# Ignore all scraped and downloaded raw videos, audios, and processed frames
+backend/downloads/
+**/downloads/
+*.mp4
+*.webm
+*.wav
+*.mp3
+*.m4a
+*.mov
+
+# ------------------------------------------------------------------------------
+# Logs and Diagnostics
+# ------------------------------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+backend-err.log
+backend-out.log
+backend/backend-err.log
+backend/backend-out.log
+
+# ------------------------------------------------------------------------------
+# Testing & Scratch Files
+# ------------------------------------------------------------------------------
+coverage/
+backend/test-ingest.js
+backend/test-transcribe.ts
+backend/test-audio.wav
+scratch/
+**/scratch/
+
+# ------------------------------------------------------------------------------
+# IDE & System Files
+# ------------------------------------------------------------------------------
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDEs/Editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
