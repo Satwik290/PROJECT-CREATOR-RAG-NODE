@@ -29,7 +29,9 @@
     "ioredis": "^5.11.0",
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
+    "wavefile": "^11.0.0",
     "youtube-dl-exec": "^3.1.7",
+    "youtube-transcript": "^1.2.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -37,7 +39,6 @@
     "@types/express": "^5.0.6",
     "@types/morgan": "^1.9.10",
     "@types/node": "^25.9.1",
-    "tsx": "^4.22.4",
-    "wavefile": "^11.0.0"
+    "tsx": "^4.22.4"
   }
 }

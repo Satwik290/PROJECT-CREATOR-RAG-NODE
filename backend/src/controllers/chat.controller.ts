@@ -151,10 +151,13 @@ export const chatStream = async (req: Request, res: Response) => {
       videoBMetadata: videoBMetadata || null,
     };
 
+    // Pass thread ID config to compile MemorySaver checkpoints
+    const config = { configurable: { thread_id: req.body.sessionId || 'default' } };
+
     let finalState: any;
     try {
       finalState = await withRetry(
-        () => agentGraph.invoke(initialState),
+        () => agentGraph.invoke(initialState, config),
         3, 2000, 'agentGraph.invoke'
       );
     } catch (err: any) {
@@ -189,7 +192,7 @@ export const chatStream = async (req: Request, res: Response) => {
 
     try {
       const controller = new AbortController();
-      let idleTimeoutId: NodeJS.Timeout;
+      let idleTimeoutId: NodeJS.Timeout | undefined = undefined;
 
       const resetIdleTimeout = () => {
         clearTimeout(idleTimeoutId);

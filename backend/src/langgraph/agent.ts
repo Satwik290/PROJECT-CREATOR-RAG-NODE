@@ -1,4 +1,4 @@
-import { StateGraph, START, END, Annotation } from '@langchain/langgraph';
+import { StateGraph, START, END, Annotation, MemorySaver } from '@langchain/langgraph';
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { searchSimilarChunks } from '../qdrant/client';
 import { generateEmbeddings } from '../services/embedding.service';
@@ -88,45 +88,41 @@ function getLlm() {
 // ──────────────────────────────────────────────
 
 // routeQuery: decides if we need vector search or just metadata.
-// Uses a simple keyword heuristic FIRST to avoid burning an LLM call
-// for every simple metadata question.
+// Uses an expanded heuristic keyword router for instant decisions and zero LLM latency.
 async function routeQuery(state: typeof GraphState.State) {
   const lastMessage = (state.messages[state.messages.length - 1].content || '').toLowerCase();
 
-  // Fast path: pure metadata questions (no LLM call needed)
   const metadataKeywords = [
     'views', 'likes', 'followers', 'engagement', 'engagement rate',
     'creator', 'platform', 'compare metrics', 'performance', 'stats',
     'statistics', 'which', 'how many', 'who got more',
+    'follower count', 'upload date', 'duration', 'hashtag',
   ];
-  const hasMetadataKeyword = metadataKeywords.some(kw => lastMessage.includes(kw));
-  const hasTranscriptKeyword = ['hook', 'script', 'say', 'mention', 'word', 'transcript',
-    'content', 'narrat', 'spoken', 'first second', 'opening', 'cta', 'call to action',
-    'pacing', 'structure'].some(kw => lastMessage.includes(kw));
+  
+  const transcriptKeywords = [
+    'hook', 'script', 'say', 'mention', 'word', 'transcript',
+    'content', 'narrat', 'spoken', 'first second', 'opening',
+    'cta', 'call to action', 'pacing', 'structure', 'improve',
+    'suggest', 'better', 'why', 'how did', 'what did', 'compare hook',
+    'retention', 'format',
+  ];
 
-  if (hasMetadataKeyword && !hasTranscriptKeyword) {
-    console.log('[routeQuery] Fast-path → compile_metadata (keyword match)');
+  const hasMetadataKeyword = metadataKeywords.some(kw => lastMessage.includes(kw));
+  const hasTranscriptKeyword = transcriptKeywords.some(kw => lastMessage.includes(kw));
+
+  if (hasTranscriptKeyword) {
+    console.log('[routeQuery] Heuristic matched transcript keyword → retrieve');
+    return 'retrieve';
+  }
+
+  if (hasMetadataKeyword) {
+    console.log('[routeQuery] Heuristic matched metadata keyword → compile_metadata');
     return 'compile_metadata';
   }
 
-  // LLM-backed routing for ambiguous queries
-  const routerPrompt = `Determine if the following user query requires semantic search in video transcripts (return "VECTOR") or just relies on the numerical metadata like views/likes/followers (return "METADATA").
-Query: "${lastMessage}"
-Output only "VECTOR" or "METADATA".`;
-
-  try {
-    const response = await withRetry(
-      () => getLlm().invoke([{ role: 'user', content: routerPrompt } as any]),
-      3, 2000, 'routeQuery'
-    );
-    const route = response.content.toString().trim().toUpperCase();
-    console.log(`[routeQuery] LLM decided: ${route}`);
-    return route.includes('VECTOR') ? 'retrieve' : 'compile_metadata';
-  } catch (err: any) {
-    // On permanent failure default to VECTOR (more complete answer)
-    console.error('[routeQuery] LLM failed after retries, defaulting to retrieve:', err?.message?.slice(0, 100));
-    return 'retrieve';
-  }
+  // Default fallback if neither keyword lists match (safest to retrieve)
+  console.log('[routeQuery] No keyword match, defaulting to retrieve');
+  return 'retrieve';
 }
 
 // retrieve: fetches relevant transcript chunks from Qdrant with error handling
@@ -225,7 +221,8 @@ const builder = new StateGraph(GraphState)
   .addEdge('compile_metadata', 'synthesize')
   .addEdge('synthesize', END);
 
-export const agentGraph = builder.compile();
+const checkpointer = new MemorySaver();
+export const agentGraph = builder.compile({ checkpointer });
 
 // getLlmStream: used by chat controller to stream the final response
 export const getLlmStream = async (messages: any[]) => {

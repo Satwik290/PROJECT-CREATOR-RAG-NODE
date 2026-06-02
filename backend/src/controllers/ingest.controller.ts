@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { downloadAudioAndMetadata } from '../services/youtube.service';
-import { transcribeAudio } from '../services/transcription.service';
+import { transcribeAudio, fetchYoutubeTranscript } from '../services/transcription.service';
 import { generateEmbeddings, chunkText } from '../services/embedding.service';
 import { storeChunks, deleteChunksForVideo } from '../qdrant/client';
 import fs from 'fs';
@@ -12,15 +12,29 @@ export const ingestVideo = async (req: Request, res: Response, next: NextFunctio
     const processUrl = async (url: string, platform: 'youtube' | 'instagram', videoId: string) => {
       console.log(`Starting ingestion for ${platform} (${videoId}): ${url}`);
 
-      // ── 1. Scrape metadata + download audio ─────────────────────────────
-      const { audioPath, metadata } = await downloadAudioAndMetadata(url, platform);
+      let transcript = '';
+      let skipAudio = false;
+
+      // ── Try YouTube caption API first to optimize speed ────────────────
+      if (platform === 'youtube') {
+        const fastTranscript = await fetchYoutubeTranscript(url);
+        if (fastTranscript) {
+          transcript = fastTranscript;
+          skipAudio = true;
+        }
+      }
+
+      // ── 1. Scrape metadata (+ optionally download audio) ───────────────
+      const { audioPath, metadata } = await downloadAudioAndMetadata(url, platform, skipAudio);
 
       // ── 2. Delete stale Qdrant chunks before storing fresh ones ─────────
       // This prevents duplicate search results on re-ingest of the same URL
       await deleteChunksForVideo(videoId);
 
-      // ── 3. Transcribe ────────────────────────────────────────────────────
-      const transcript = await transcribeAudio(audioPath);
+      // ── 3. Transcribe locally if fast transcript was not found ──────────
+      if (!transcript) {
+        transcript = await transcribeAudio(audioPath);
+      }
 
       // ── 4. Chunk + Embed + Store ─────────────────────────────────────────
       if (transcript && transcript.trim().length > 0) {

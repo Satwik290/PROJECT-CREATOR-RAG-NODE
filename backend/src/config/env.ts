@@ -9,6 +9,9 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY is required'),
   QDRANT_URL: z.string().default('http://localhost:6333'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
+  // Optional: Instagram metadata enrichment (set one or both for best results)
+  RAPIDAPI_KEY: z.string().optional(),
+  INSTAGRAM_SESSION_ID: z.string().optional(),
 });
 
 const _env = envSchema.safeParse(process.env);

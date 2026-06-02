@@ -6,6 +6,8 @@ import dotenv from 'dotenv';
 import { errorHandler } from './middlewares/errorHandler';
 import routes from './routes';
 import { initializeQdrant } from './qdrant/client';
+import { initEmbeddingModel } from './services/embedding.service';
+import { initTranscriber } from './services/transcription.service';
 
 dotenv.config();
 
@@ -30,6 +32,11 @@ const PORT = process.env.PORT || 3001;
 
 app.listen(PORT, async () => {
   console.log(`Server starting on port ${PORT}`);
+  
+  // Warm up the models in the background asynchronously so we don't block server startup
+  initEmbeddingModel().catch(err => console.error("❌ Failed to warm up BGE embedding model:", err));
+  initTranscriber().catch(err => console.error("❌ Failed to warm up Whisper transcriber model:", err));
+
   await initializeQdrant();
   console.log(`✅ Server ready on http://localhost:${PORT}`);
 });

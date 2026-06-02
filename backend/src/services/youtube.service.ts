@@ -138,14 +138,99 @@ const fetchYouTubeOEmbed = async (url: string): Promise<{ title: string; creator
 // Instagram scraper via yt-dlp (cookie-less, prototype mode)
 // Falls back to lightweight HTML scrape for public profiles
 // ──────────────────────────────────────────────
+// Instagram scraper — cascading strategy waterfall
+//   0. RapidAPI Instagram Web Scraper (best quality, requires RAPIDAPI_KEY)
+//   1. Session cookie authenticated API (requires INSTAGRAM_SESSION_ID)
+//   2. yt-dlp (often blocked but works for some public reels)
+//   3. HTML OG meta-tag scrape (last resort, no view count)
+// ──────────────────────────────────────────────
 const scrapeInstagramMeta = async (url: string): Promise<{
   title: string; creator: string; views: number; likes: number; comments: number; followerCount: number;
 }> => {
   const empty = { title: 'Instagram Reel', creator: '', views: 0, likes: 0, comments: 0, followerCount: 0 };
+  const shortcode = url.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/)?.[1];
 
-  // Strategy 1: yt-dlp with Instagram-specific user-agent
+  // ── Strategy 0: RapidAPI Instagram Web Scraper ───────────────────────
+  // Sign up at https://rapidapi.com/social-api1-instagram/api/instagram-scraper-api2
+  // Free tier: 50 requests/month. Paid plans start at $0.001/request.
+  if (shortcode && process.env.RAPIDAPI_KEY) {
+    try {
+      console.log('[Instagram] Strategy 0: RapidAPI Instagram scraper...');
+      const res = await fetchWithTimeout(
+        `https://instagram-scraper-api2.p.rapidapi.com/v1/post_info?code_or_id_or_url=${encodeURIComponent(url)}`,
+        {
+          headers: {
+            'x-rapidapi-host': 'instagram-scraper-api2.p.rapidapi.com',
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+          },
+        },
+        10_000
+      );
+      if (res.ok) {
+        const json: any = await res.json();
+        const d = json?.data;
+        if (d && (d.owner?.username || d.caption_text)) {
+          const result = {
+            title: d.caption_text?.slice(0, 100) || d.accessibility_caption || 'Instagram Reel',
+            creator: d.owner?.username || d.user?.username || '',
+            views: d.video_view_count || d.play_count || d.view_count || 0,
+            likes: d.like_count || d.likes?.count || 0,
+            comments: d.comment_count || d.comments?.count || 0,
+            followerCount: d.owner?.follower_count || d.user?.follower_count || 0,
+          };
+          console.log(`[Instagram Strategy 0 ✅ RapidAPI] creator="${result.creator}" views=${result.views} likes=${result.likes}`);
+          return result;
+        }
+        console.warn('[Instagram Strategy 0] RapidAPI returned empty data:', JSON.stringify(json).slice(0, 200));
+      } else {
+        const errBody = await res.text().catch(() => '');
+        console.warn(`[Instagram Strategy 0] RapidAPI HTTP ${res.status}:`, errBody.slice(0, 120));
+      }
+    } catch (err: any) {
+      console.warn('[Instagram Strategy 0] RapidAPI failed:', err.message?.slice(0, 100));
+    }
+  }
+
+  // ── Strategy 1: Authenticated session cookie API ─────────────────────
+  if (shortcode && process.env.INSTAGRAM_SESSION_ID) {
+    try {
+      console.log('[Instagram] Strategy 1: Session Cookie API...');
+      const res = await fetchWithTimeout(
+        `https://www.instagram.com/p/${shortcode}/?__a=1&__d=dis`,
+        {
+          headers: {
+            'Cookie': `sessionid=${process.env.INSTAGRAM_SESSION_ID}`,
+            'User-Agent': 'Instagram 219.0.0.12.117 Android',
+          },
+        },
+        8000
+      );
+      if (res.ok) {
+        const data: any = await res.json();
+        const item = data?.graphql?.shortcode_media || data?.items?.[0];
+        if (item) {
+          const result = {
+            title: item.accessibility_caption || item.caption?.text?.slice(0, 80) || 'Instagram Reel',
+            creator: item.owner?.username || '',
+            views: item.video_view_count || item.play_count || 0,
+            likes: item.edge_media_preview_like?.count || item.like_count || 0,
+            comments: item.edge_media_to_comment?.count || item.comment_count || 0,
+            followerCount: item.owner?.edge_followed_by?.count || 0,
+          };
+          console.log(`[Instagram Strategy 1 ✅ Session] creator="${result.creator}" views=${result.views}`);
+          return result;
+        }
+      } else {
+        console.warn(`[Instagram Strategy 1] Session API HTTP ${res.status}`);
+      }
+    } catch (err: any) {
+      console.warn('[Instagram Strategy 1] Session scrape failed:', err.message?.slice(0, 80));
+    }
+  }
+
+  // ── Strategy 2: yt-dlp with Instagram-specific user-agent ────────────
   try {
-    console.log('[Instagram] Attempting yt-dlp scrape...');
+    console.log('[Instagram] Strategy 2: yt-dlp...');
     const raw: any = await youtubeDl(url, {
       dumpSingleJson: true,
       noCheckCertificates: true,
@@ -157,7 +242,7 @@ const scrapeInstagramMeta = async (url: string): Promise<{
     });
 
     if (raw && (raw.title || raw.uploader)) {
-      console.log(`[Instagram yt-dlp] title="${raw.title}" creator="${raw.uploader}" views=${raw.view_count}`);
+      console.log(`[Instagram Strategy 2 ✅ yt-dlp] title="${raw.title}" creator="${raw.uploader}" views=${raw.view_count}`);
       return {
         title: raw.title || raw.description?.slice(0, 80) || 'Instagram Reel',
         creator: raw.uploader || raw.channel || raw.uploader_id || '',
@@ -168,12 +253,12 @@ const scrapeInstagramMeta = async (url: string): Promise<{
       };
     }
   } catch (err: any) {
-    console.warn('[Instagram] yt-dlp blocked/failed:', err.message?.slice(0, 120));
+    console.warn('[Instagram Strategy 2] yt-dlp blocked/failed:', err.message?.slice(0, 120));
   }
 
-  // Strategy 2: Lightweight HTML fetch with timeout (works for public posts)
+  // ── Strategy 3: HTML OG meta-tag scrape ──────────────────────────────
   try {
-    console.log('[Instagram] Attempting HTML meta-tag scrape...');
+    console.log('[Instagram] Strategy 3: HTML OG scrape...');
     const res = await fetchWithTimeout(url, {
       headers: {
         'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
@@ -184,31 +269,20 @@ const scrapeInstagramMeta = async (url: string): Promise<{
 
     if (res.ok) {
       const html = await res.text();
-
-      // Extract OG tags
       const ogTitle = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i)?.[1] || '';
       const ogDesc = html.match(/<meta\s+property="og:description"\s+content="([^"]+)"/i)?.[1] || '';
-      const ogSiteName = html.match(/<meta\s+property="og:site_name"\s+content="([^"]+)"/i)?.[1] || '';
-
-      // Try to parse creator from description (Instagram format: "X likes, Y comments - Creator Name")
       const descMatch = ogDesc.match(/^([\d,KkMm.]+)\s+likes?,\s+([\d,KkMm.]+)\s+comments?\s*[-–]\s*(.+)$/i);
       const likesFromDesc = descMatch ? parseAbbreviated(descMatch[1]) : 0;
       const commentsFromDesc = descMatch ? parseAbbreviated(descMatch[2]) : 0;
       const creatorFromDesc = descMatch ? descMatch[3].trim() : '';
-
-      // Try to get shortcode for creator extraction from URL
-      const shortcodeMatch = url.match(/\/p\/([A-Za-z0-9_-]+)|\/reel\/([A-Za-z0-9_-]+)/);
-      const shortcode = shortcodeMatch?.[1] || shortcodeMatch?.[2] || '';
-
-      // Extract creator from URL path as last resort
       const urlCreator = url.match(/instagram\.com\/([^/?]+)\//)?.[1] || '';
 
       if (ogTitle || creatorFromDesc) {
-        console.log(`[Instagram HTML] title="${ogTitle}" creator="${creatorFromDesc || urlCreator}"`);
+        console.log(`[Instagram Strategy 3 ✅ HTML] title="${ogTitle}" creator="${creatorFromDesc || urlCreator}"`);
         return {
           title: ogTitle || 'Instagram Reel',
           creator: creatorFromDesc || urlCreator || '',
-          views: 0, // Instagram hides view count in HTML
+          views: 0,
           likes: likesFromDesc,
           comments: commentsFromDesc,
           followerCount: 0,
@@ -216,12 +290,13 @@ const scrapeInstagramMeta = async (url: string): Promise<{
       }
     }
   } catch (err: any) {
-    console.warn('[Instagram] HTML scrape failed:', err.message?.slice(0, 120));
+    console.warn('[Instagram Strategy 3] HTML scrape failed:', err.message?.slice(0, 120));
   }
 
-  console.warn('[Instagram] All scrape strategies failed — using empty fallback');
+  console.warn('[Instagram] All 4 strategies failed — using empty fallback. Set RAPIDAPI_KEY in .env for reliable data.');
   return empty;
 };
+
 
 // ──────────────────────────────────────────────
 // Gemini Google Search grounding — get real-time social metrics
@@ -359,7 +434,8 @@ Return ONLY this JSON object, no other text:
 // ──────────────────────────────────────────────
 export const downloadAudioAndMetadata = async (
   url: string,
-  platform: 'youtube' | 'instagram'
+  platform: 'youtube' | 'instagram',
+  skipAudio = false
 ): Promise<{ audioPath: string; metadata: VideoMetadata }> => {
 
   const outputId = crypto.randomUUID();
@@ -374,6 +450,10 @@ export const downloadAudioAndMetadata = async (
   const cachedMeta = await getCached<VideoMetadata>(metaCk);
   if (cachedMeta) {
     console.log(`[cache HIT] Metadata for ${url.slice(-40)} — skipping scrape`);
+    if (skipAudio) {
+      writeSilentWav(finalAudioPath);
+      return { audioPath: finalAudioPath, metadata: { ...cachedMeta, dataSource: 'cached' } };
+    }
     // Still need to download audio (no audio cache)
     let audioOk = false;
     try {
@@ -489,6 +569,11 @@ export const downloadAudioAndMetadata = async (
   // Cache the metadata result for 1 hour
   await setCached(metaCk, metadata, TTL.METADATA);
   console.log(`[cache SET] Metadata cached for ${url.slice(-40)}`);
+
+  if (skipAudio) {
+    writeSilentWav(finalAudioPath);
+    return { audioPath: finalAudioPath, metadata };
+  }
 
   // ── 4. Download Audio ─────────────────────────────────────────────────
   let audioOk = false;

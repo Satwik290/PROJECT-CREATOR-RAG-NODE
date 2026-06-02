@@ -75,15 +75,25 @@ export const storeChunks = async (
     };
   });
 
-  try {
-    await qdrant.upsert(COLLECTION_NAME, {
-      wait: true,
-      points: pointsWithUUIDs,
-    });
-    console.log(`[Qdrant] Stored ${pointsWithUUIDs.length} chunks for videoId='${videoId}'`);
-  } catch (err: any) {
-    console.error('[Qdrant] storeChunks failed:', err?.message?.slice(0, 120));
-    throw err; // let ingest controller handle it via Promise.allSettled
+  const MAX_RETRIES = 3;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await qdrant.upsert(COLLECTION_NAME, {
+        wait: true,
+        points: pointsWithUUIDs,
+      });
+      console.log(`[Qdrant] Stored ${pointsWithUUIDs.length} chunks for videoId='${videoId}'`);
+      return;
+    } catch (err: any) {
+      const isLastAttempt = attempt === MAX_RETRIES;
+      if (isLastAttempt) {
+        console.error(`[Qdrant] storeChunks failed after ${MAX_RETRIES} attempts:`, err?.message?.slice(0, 120));
+        throw err; // let ingest controller handle via Promise.allSettled
+      }
+      const delayMs = attempt * 1500; // 1.5s, 3s backoff
+      console.warn(`[Qdrant] storeChunks attempt ${attempt} failed (${err?.message?.slice(0, 60)}). Retrying in ${delayMs}ms...`);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
   }
 };
 
@@ -106,6 +116,9 @@ export const searchSimilarChunks = async (
       filter,
       with_payload: true,
     });
+    if (result.length === 0) {
+      console.log(`[Qdrant] No similar chunks found for query. filter=${filterField || 'none'}:${filterValue || 'none'}`);
+    }
     return result;
   } catch (err: any) {
     console.error('[Qdrant] searchSimilarChunks failed:', err?.message?.slice(0, 120));

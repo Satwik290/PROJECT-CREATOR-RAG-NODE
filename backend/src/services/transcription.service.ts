@@ -1,10 +1,37 @@
 import fs from 'fs';
 import { pipeline } from '@xenova/transformers';
 import { WaveFile } from 'wavefile';
+import { YoutubeTranscript } from 'youtube-transcript';
 
 let transcriber: any = null;
 
-const initTranscriber = async () => {
+export const fetchYoutubeTranscript = async (url: string): Promise<string | null> => {
+  try {
+    console.log(`[YouTube Transcript] Fetching captions for ${url}...`);
+    // Handle all YouTube URL formats including /shorts/VIDEO_ID
+    const match = url.match(
+      /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([^&?/\s]+)/
+    );
+    const videoId = match ? match[1] : url;
+
+    const list = await YoutubeTranscript.fetchTranscript(videoId);
+    if (list && list.length > 0) {
+      const text = list
+        .map(item => item.text)
+        .join(' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&#39;/g, "'")
+        .replace(/&quot;/g, '"');
+      console.log(`[YouTube Transcript] Successfully fetched captions (${text.length} chars)`);
+      return text;
+    }
+  } catch (err: any) {
+    console.warn(`[YouTube Transcript] Failed to fetch captions:`, err?.message?.slice(0, 120) || err);
+  }
+  return null;
+};
+
+export const initTranscriber = async () => {
   if (!transcriber) {
     console.log("Loading local Whisper model (Xenova/whisper-tiny)...");
     transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny');
@@ -25,7 +52,7 @@ export const transcribeAudio = async (audioPath: string): Promise<string> => {
     wav.toBitDepth('32f');
     wav.toSampleRate(16000);
     
-    let audioData = wav.getSamples();
+    let audioData: any = wav.getSamples();
     
     // Handle stereo: extract left channel or average channels
     if (Array.isArray(audioData)) {

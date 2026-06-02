@@ -118,8 +118,14 @@ export default function Home() {
   const [loadingStep, setLoadingStep] = useState<string>('Connecting...');
   const [toastMsg, setToastMsg] = useState('');
   const [rateLimitTimer, setRateLimitTimer] = useState(0);
+  const [sessionId, setSessionId] = useState<string>('');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    // Unique session ID to support persistent thread memory in checkpointer
+    setSessionId(Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15));
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -220,7 +226,7 @@ export default function Home() {
       const response = await fetch(`${BACKEND}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: updatedHistory, videoAMetadata, videoBMetadata }),
+        body: JSON.stringify({ messages: updatedHistory, videoAMetadata, videoBMetadata, sessionId }),
         signal: abortRef.current.signal,
       });
 
